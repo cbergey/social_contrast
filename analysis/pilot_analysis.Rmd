@@ -1,0 +1,75 @@
+---
+title: "pilot analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidyboot)
+library(here)
+library(anonymizer)
+```
+
+```{r read-data}
+kid_data <- read_csv(here("data/e1_kid_pilot.csv")) %>%
+  filter(!is.na(answer)) # exclude children who did not answer
+
+adult_data_raw <- read_csv(here("data/e1_adult_test_raw.csv")) %>%
+  mutate(subid = anonymize(prolific_id)) %>%
+  filter(!str_detect(StartDate, "Date"), # remove extra rows
+         DistributionChannel == "anonymous") # exclude trial runs of experiment
+
+# ordering vars from qualtrics
+nice_orders = c("FL_73", "FL_77", "FL_81", "FL_85")
+smart_orders = c("FL_76", "FL_79", "FL_83", "FL_87")
+
+
+adult_data <- adult_data_raw %>%
+  filter(understand_consent == "Yes" & age_eighteen_older == "Yes" 
+         & final_consent == "Yes") %>% # include only people who gave consent and qualify for exp
+  filter(attn_check == "smart,nice") %>% # include only people who passed attn check 
+  rename(nice = prop_nice_1, smart = prop_smart_1) %>%
+  mutate(figure_nice = if_else(str_detect(adj_condition_nice, "1"), 
+                               "long_hair", "short_hair"), # recode type of figure
+         figure_smart = if_else(str_detect(adj_condition_smart, "1"), 
+                                "long_hair", "short_hair"), # recode type of figure
+         adj_condition_nice = str_remove(str_remove(adj_condition_nice, "_nice"), "[12]"), # clean up conditions
+         adj_condition_smart = str_remove(str_remove(adj_condition_smart, "_smart"), "[12]")) %>%
+  pivot_longer(cols = c(nice, smart), 
+               names_to = "trait", values_to = "proportion") %>% # put dv in longer format
+  mutate(figure = if_else(trait == "nice", 
+                          figure_nice, figure_smart), # put conditions in longer format
+         adj_condition = if_else(trait == "nice", 
+                                 adj_condition_nice, adj_condition_smart),
+         proportion = as.numeric(proportion),
+         adj_condition = factor(adj_condition),
+         figure = factor(figure),
+         trait = factor(trait),
+         order = str_remove_all(paste0(FL_67_DO, FL_68_DO, FL_69_DO, FL_70_DO),"[NA]")) %>%
+  separate(order, into = c("trial_1", "trial_2"), sep = "[|]") %>%
+  mutate(trial_1 = if_else(trial_1 %in% nice_orders, "nice", "smart"),
+         trial_2 = if_else(trial_2 %in% nice_orders, "nice", "smart"),
+         trial_num = if_else(trial_1 == trait, "1", "2")) %>%  
+  select(subid, trial_num, trait, adj_condition, figure, proportion) 
+
+#write_csv(adult_data, here("data/adult_pilot_test.csv"))
+
+adult_data %>%
+  ggplot(aes(x = adj_condition, y = proportion, group = adj_condition)) +
+  geom_jitter(aes(x = adj_condition)) 
+
+
+kid_data %>%
+  count(condition, answer) %>%
+  group_by(condition) %>%
+  mutate(prop = n/sum(n)) %>%
+  mutate(answer = factor(answer, levels = c("none","some","most","all"))) %>%
+  ggplot(aes(x = answer, y = prop, group = condition)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~condition)
+
+
+
+```
